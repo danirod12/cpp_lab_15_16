@@ -3,10 +3,18 @@
 #include <valarray>
 #include <iomanip>
 #include "Matrix.hpp"
+#include "LetterMath.hpp"
 
 long long callOperation(long size, int blocks);
 
 int main() {
+    Matrix<LetterMath> matrix(3, 3);
+    for (int i = 0; i < 9; ++i) {
+        matrix.setValue(i, {"c" + std::to_string(i + 1)});
+    }
+
+    std::cout << matrix.getInverted();
+
     std::ofstream out("./../data.csv");
     out << std::setprecision(50);
     out << ";";

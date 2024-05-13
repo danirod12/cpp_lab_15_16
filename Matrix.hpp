@@ -43,7 +43,7 @@ class Matrix {
 
         // reset memory after malloc
         for (int i = 0; i < size; ++i) {
-            this->array[i] = (T) 0;
+            this->array[i] = T();
         }
     }
 
@@ -290,9 +290,9 @@ class Matrix {
         } else {
             T value;
             for (int i = 0; i < this->columns; ++i) {
-                if (this->array[i] != 0) {
-                    T middle = (i % 2 == 0 ? 1 : -1)
-                               * this->array[i] * this->getMinor(0, i).getDeterminant();
+                if (this->array[i] != T()) {
+                    T middle = this->array[i] * this->getMinor(0, i).getDeterminant()
+                            * (i % 2 == 0 ? 1 : -1);
                     if (i == 0) {
                         value = middle;
                     } else {
@@ -349,8 +349,8 @@ class Matrix {
      * @throws invalid_argument if matrix determinant is zero
      */
     Matrix<T> getInverted() const {
-        double determinant = this->getDeterminant();
-        if (determinant == 0) {
+        T determinant = this->getDeterminant();
+        if (determinant == T()) {
             throw std::invalid_argument("Matrix cannot be inverted");
         }
 
@@ -358,8 +358,8 @@ class Matrix {
         Matrix<T> additions(rows, this->columns);
         for (int i = 0; i < rows; ++i) {
             for (int j = 0; j < additions.columns; ++j) {
-                additions.setValue(i, j, ((i + j) % 2 == 0 ? 1 : -1)
-                                         * this->getMinor(i, j).getDeterminant());
+                additions.setValue(i, j, this->getMinor(i, j).getDeterminant()
+                                         * ((i + j) % 2 == 0 ? 1 : -1));
             }
         }
         return additions.transposed() / determinant;
