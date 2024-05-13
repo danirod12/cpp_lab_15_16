@@ -4,8 +4,11 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <thread>
+#include <mutex>
+#include <future>
 
-template <typename T>
+template<typename T>
 class Matrix {
  private:
     unsigned long columns;
@@ -214,6 +217,63 @@ class Matrix {
     }
 
     /**
+     * Get a matrix minor for element
+     * @param row Removing row
+     * @param column Removing column
+     * @return
+    */
+    [[nodiscard]] Matrix<T> getMinorAsync(int row, int column) const {
+        requireRow(row);
+        requireColumn(column);
+        if (this->size == this->columns || this->columns == 1) {
+            throw std::invalid_argument("Cannot extract minor from matrix of 1 dimension");
+        }
+
+        std::vector<std::thread> threads;
+
+        Matrix<T> matrix(this->getRows() - 1, this->columns - 1);
+
+        unsigned int blocks = std::thread::hardware_concurrency();
+        int elementsPerThread = this->size / blocks + 1;
+
+        threads.reserve(blocks);
+
+        int skipFrom = row * this->columns;
+        for (int j = 0; j < this->size; j += elementsPerThread) {
+            if (j >= skipFrom && j < skipFrom + this->columns) {
+                j = skipFrom + this->columns;
+            }
+
+            threads.emplace_back(std::thread([this, &matrix, skipFrom, column, j, elementsPerThread] {
+                int index = j;
+                if (index >= skipFrom + this->columns) {
+                    index -= this->columns - 1;
+                }
+                index -= j / this->columns + (j % this->columns >= column ? 1 : 0);
+
+                for (int i = j; i < elementsPerThread + j && i < this->size; ++i) {
+                    if (i % this->columns == column) {
+                        continue;
+                    }
+                    if (i == skipFrom) {
+                        i += this->columns - 1;
+                        continue;
+                    }
+                    matrix.setValue(index, this->array[i]);
+                    index++;
+                }
+            }));
+        }
+
+        for (auto &th: threads) {
+            if (th.joinable()) {
+                th.join();
+            }
+        }
+        return matrix;
+    }
+
+    /**
      * Get determinate for cube matrix (Matrix::isSquare)
      * @return double determinant value
      * @throws invalid_argument if matrix is not cube
@@ -239,6 +299,45 @@ class Matrix {
                         value += middle;
                     }
                 }
+            }
+            return value;
+        }
+    }
+
+    /**
+     * Get determinate for cube matrix (Matrix::isSquare)
+     * @return double determinant value
+     * @throws invalid_argument if matrix is not cube
+     */
+    T getDeterminantAsync(int levels) const { // NOLINT
+        if (!isSquare()) {
+            throw std::invalid_argument("Matrix must be square");
+        }
+
+        if (this->size == 1) {
+            return this->array[0];
+        } else if (this->size == 4) {
+            return this->array[0] * this->array[3] - this->array[1] * this->array[2];
+        } else {
+            std::vector<std::future<T>> futures;
+
+            for (int i = 0; i < this->columns; ++i) {
+                if (this->array[i] != 0) {
+                    futures.emplace_back(std::async(std::launch::async, [this, i, levels]() {
+                        T minorDet = T();
+                        if (levels > 0) {
+                            minorDet = this->getMinor(0, i).getDeterminantAsync(levels - 1);
+                        } else {
+                            minorDet = this->getMinor(0, i).getDeterminant();
+                        }
+                        return (i % 2 == 0 ? 1 : -1) * this->array[i] * minorDet;
+                    }));
+                }
+            }
+
+            T value = 0;
+            for (auto &f: futures) {
+                value += f.get();
             }
             return value;
         }
@@ -277,6 +376,76 @@ class Matrix {
             matrix.array[i] = this->array[i] + another.array[i];
         }
         return matrix;
+    }
+
+    Matrix<T> sumWithAsync(const Matrix<T> &another) const {
+        unsigned int threadsToUse = std::thread::hardware_concurrency();
+        if (threadsToUse <= 0) {
+            return this->operator+(another);
+        }
+
+        this->requireSameDimensions(another);
+        auto *matrix = new Matrix(this->getRows(), this->columns);
+        std::vector<std::thread> threads;
+
+        if (this->size / 10 <= threadsToUse) {
+            threadsToUse = (this->size + 9) / 10;
+        }
+
+        int operationsPerThread = this->size / threadsToUse;
+        for (int i = 0; i < threadsToUse; ++i) {
+            int j = operationsPerThread * i;
+            int k = i == threadsToUse - 1 ? this->size : operationsPerThread + j;
+
+            threads.emplace_back([j, k, &matrix, this, &another]() {
+                for (int index = j; index < k; ++index) {
+                    matrix->array[index] = this->array[index] + another.array[index];
+                }
+            });
+        }
+
+        for (auto &item: threads) {
+            item.join();
+        }
+        return *matrix;
+    }
+
+    std::future<std::unique_ptr<Matrix<T>>> sumWithAsync(const Matrix<T> &another, int blocks) const {
+        if (blocks <= 0) {
+            auto matrix = std::make_unique<Matrix<T>>(this->operator+(another));
+            return std::async(std::launch::async, [matrix = std::move(matrix)]() mutable {
+                return std::move(matrix);
+            });
+        }
+
+        this->requireSameDimensions(another);
+        auto matrix = std::make_unique<Matrix<T>>(this->getRows(), this->columns);
+        std::vector<std::future<void>> threads;
+
+        if (this->size / 10 <= blocks) {
+            blocks = (this->size + 9) / 10;
+        }
+
+        int operationsPerThread = this->size / blocks;
+        for (int i = 0; i < blocks; ++i) {
+            int j = operationsPerThread * i;
+            int k = i == blocks - 1 ? this->size : operationsPerThread + j;
+
+            threads.emplace_back(std::async(std::launch::async,
+                                            [j, k, matrix = matrix.get(), this, &another]() mutable {
+                                                for (int index = j; index < k; ++index) {
+                                                    matrix->array[index] = this->array[index] + another.array[index];
+                                                }
+                                            }));
+        }
+
+        return std::async(std::launch::async,
+                          [matrix = std::move(matrix), futures = std::move(threads)]() mutable {
+                              for (auto &future: futures) {
+                                  future.wait();
+                              }
+                              return std::move(matrix);
+                          });
     }
 
     Matrix<T> operator-() const {
