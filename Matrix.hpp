@@ -8,8 +8,8 @@
 template <typename T>
 class Matrix {
  private:
-    int columns;
-    long size;
+    unsigned long columns;
+    unsigned long size;
 
     // We store lines each after each. l - line, c - column [l1c1, l1c2, /* new line elements next */ l2c1, l2c2]
     T *array;
@@ -33,7 +33,7 @@ class Matrix {
     }
 
  public:
-    Matrix(int rows, int columns) {
+    Matrix(unsigned long rows, unsigned long columns) {
         this->array = new T[rows * columns];
         this->columns = columns;
         this->size = columns * rows;
@@ -49,6 +49,18 @@ class Matrix {
         this->array = deserialized.array;
         this->columns = deserialized.columns;
         this->size = deserialized.size;
+    }
+
+    // Copy constructor
+    Matrix(const Matrix<T> &other) : columns(other.columns), size(other.size), array(new T[other.size]) {
+        std::copy(other.array, other.array + other.size, array);
+    }
+
+    // Move constructor
+    Matrix(Matrix<T> &&other) noexcept: columns(other.columns), size(other.size), array(other.array) {
+        other.array = nullptr;
+        other.size = 0;
+        other.columns = 0;
     }
 
     ~Matrix() {
@@ -114,11 +126,11 @@ class Matrix {
         return this->size;
     }
 
-    [[nodiscard]] int getInternalIndex(int row, int column) const {
+    [[nodiscard]] unsigned long getInternalIndex(int row, int column) const {
         this->requireColumn(column);
         this->requireRow(row);
 
-        return row * this->columns + column;
+        return ((unsigned long) row) * this->columns + column;
     }
 
     /**
